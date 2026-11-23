@@ -4,6 +4,8 @@ Connect a read-only OPC UA observer to a controller, choose the channels to coll
 
 ![Overview with a simulated controller and a real Prometheus scrape](docs/screens/overview.png)
 
+See the [operator guide](docs/operator-guide.md) for setup, terminology and event monitoring.
+
 ## Connect your first controller
 
 1. Install the ARM64 app through Orenda Apps and approve **Outbound network access** and **Publish app measurements**.

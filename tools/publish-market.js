@@ -23,8 +23,13 @@ async function main() {
   await api(existing ? app : apps,{token,method:existing ? 'PUT' : 'POST',body:{id,name,description,category,runtime,metadata,port:3101}});
   const img = 'https://raw.githubusercontent.com/OrendaNet/OrendaOpcUa/' + v.version + '/docs/screens/';
   await api(app + '/storefront',{token, method:'PUT', body:{slug:id,headline:name,shortDescription:description,
-    longDescription:'Connect a controller, approve its certificate and select signals. The Box collects selected readings automatically. Inspect channel quality, controller timestamps and recent events in Edge Console.',
-    categories:['industrial','monitoring'], tags:['opc-ua','prometheus','robotics','telemetry'], logoUrl:img+'orendabox.png', heroUrl:img+'overview.png', screenshots:[img+'overview.png',img+'channels.png'], documentationUrl:github+'#readme',supportUrl:github+'/issues'}});
+    longDescription:[
+      'Monitor an OPC UA controller from OrendaBox. Connect the controller, verify its certificate and choose the signals you want to collect. The Box automatically publishes the selected channels to its own Prometheus.',
+      'A channel is one machine measurement or Boolean state, such as an axis position or an emergency-stop flag. The channel browser shows its value, OPC UA quality and controller timestamp. Good readings are exported. Stale or invalid readings drop out of the value series.',
+      'Select an event source to see recent controller messages, condition codes, severity and receipt times. Operators can monitor the machine. Administrators manage the connection, sample interval, event source and up to 128 signals.',
+      'Requires a compatible ARM64 OrendaBox with DevicePlatform 0.2.92 or later and a Sign & Encrypt OPC UA endpoint. Outbound network access reaches the controller. The separate measurement grant enables Box collection.'
+    ].join('\n\n'),
+    categories:['industrial','monitoring'], tags:['opc-ua','prometheus','robotics','telemetry'], logoUrl:img+'orendabox.png', heroUrl:img+'overview.png', screenshots:['overview.png','channels.png','events.png','prometheus.png'].map(file => img+file), documentationUrl:github+'/blob/'+v.version+'/docs/operator-guide.md',supportUrl:github+'/issues'}});
   const previous = (await api(app+'/versions',{token})).versions.find(x => x.version === v.version);
   if (previous && previous.digest !== v.digest) throw Error('Market version already uses a different digest');
   if (!previous) await api(app+'/versions',{token,body:v});
