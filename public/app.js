@@ -52,6 +52,7 @@ async function refresh() {
   const next = await request('api/state');
   if (state && next.revision < state.revision) return;
   const first = !state;
+  const selectionChanged = state && next.revision !== state.revision;
   if (state && next.generation !== state.generation) { staged.clear(); renderBasket(); $('inspector').hidden=true; page=null; }
   state = next;
   if (first) {
@@ -75,6 +76,11 @@ async function refresh() {
   set('outputStatus', state.lastScrape ? state.exportState + ' · Last Box scrape ' + shortTime(state.lastScrape) : state.exportState);
   set('queryExample', 'orenda_app_channel_value{app_id=' + JSON.stringify(state.appId) + '}');
   renderReadings(); renderSelected(); renderEvents();
+  if (selectionChanged && page && view === 'channels') {
+    for (const channel of state.channels) staged.delete(channel.nodeId);
+    renderBasket(); drawNodes();
+    if (inspected && state.channels.some(channel => channel.nodeId === inspected.id)) $('addForm').hidden = true;
+  }
 }
 async function mutate(name, fields) {
   await request('api/' + name, { ...fields, revision: state.revision });
@@ -108,7 +114,10 @@ function renderReadings() {
   const body = el('tbody');
   for (const c of state.channels) {
     const item = state.samples[c.metric], row = el('tr');
-    for (const v of [c.metric, item?.good && item.numeric ? item.value : '—',
+    const channel = el('td');
+    channel.append(el('strong', c.name), el('small', c.metric));
+    row.append(channel);
+    for (const v of [item?.good && item.numeric ? item.value : '—',
       item?.quality || (state.online ? 'Waiting' : 'Offline'), shortTime(item?.sourceTime)]) row.append(el('td', v));
     body.append(row);
   }
@@ -161,10 +170,15 @@ function drawNodes() {
     }, 'node'));
     if (!folder) {
       const box = el('input'); box.type = 'checkbox'; box.className = 'channel-check'; box.setAttribute('aria-label','Monitor ' + r.name); box.checked = staged.has(r.id);
+      const monitored = state.channels.some(channel => channel.nodeId === r.id);
+      if (monitored) {
+        box.checked = true; box.disabled = true;
+        box.setAttribute('aria-label', r.name + ' is monitored');
+      }
       box.onchange = () => { if (box.checked && staged.size >= 32) { box.checked = false; say('Save these 32 channels before selecting more.', true); return; } if (box.checked) staged.set(r.id, {id:r.id, path:[...path.map(p=>p.name),r.name].join(' / ')}); else staged.delete(r.id); renderBasket(); }; row.prepend(box);
     }
     if (folder) row.append(btn('Inspect', () => inspect(r.id)));
-    else row.append(el('small', r.kind));
+    else row.append(el('small', state.channels.some(channel => channel.nodeId === r.id) ? 'Monitoring' : r.kind));
     return row;
   }));
   if (!rows.length) $('nodes').append(empty(query ? 'No matches on this page.' : 'No child nodes.'));
@@ -177,7 +191,9 @@ async function inspect(id) {
   $('preview').replaceChildren(el('h3', n.name), el('code', n.id, 'wrap'),
     el('p', n.kind === 'Variable' ? [n.type, n.quality, n.value ?? '—', shortTime(n.sourceTime)].join(' · ') : n.kind));
   if (n.quality === 'BadUserAccessDenied') $('preview').append(el('p', 'Check the controller user’s read permissions and enabled data options.'));
-  $('addForm').hidden = !(n.good && n.numeric);
+  const monitored = state.channels.some(channel => channel.nodeId === n.id);
+  if (monitored) $('preview').append(el('p', 'This channel is being monitored.'));
+  $('addForm').hidden = monitored || !(n.good && n.numeric);
   let suffix = (path.length > 1 ? path.slice(-2).map(p => p.name).concat(n.name) : [n.name]).join('_');
   suffix = suffix.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   $('metric').value = (/^[a-z]/.test(suffix) ? suffix : 'channel_' + suffix).slice(0, 63);
