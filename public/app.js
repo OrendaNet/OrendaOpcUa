@@ -1,6 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const views = ['overview', 'channels', 'events', 'output', 'connection'];
+const staged = new Map();
 let state, view = 'overview', certificate, inspected, page, offset = 0, browseGeneration = 0;
 let path = [{ id: 'i=85', name: 'Objects' }], pending = false;
 
@@ -51,6 +52,8 @@ async function refresh() {
   const next = await request('api/state');
   if (state && next.revision < state.revision) return;
   const first = !state;
+  const selectionChanged = state && next.revision !== state.revision;
+  if (state && next.generation !== state.generation) { staged.clear(); renderBasket(); $('inspector').hidden=true; page=null; }
   state = next;
   if (first) {
     $('url').value = state.connection?.url || '';
@@ -66,9 +69,18 @@ async function refresh() {
   const recent = state.lastScrape && Date.now() - Date.parse(state.lastScrape) < 120000;
   set('scrapeStatus', recent ? 'Receiving scrapes' : state.lastScrape ? 'Last scrape > 2 min' : 'Awaiting scrape');
   set('scrapeTime', state.lastScrape ? shortTime(state.lastScrape) : 'No collector has scraped this app');
-  set('outputStatus', state.lastScrape ? 'Last collector scrape ' + shortTime(state.lastScrape) : 'Waiting for the first collector scrape.');
+  if (!['Publishing to Box', 'Awaiting first Box scrape'].includes(state.exportState)) set('scrapeStatus', state.exportState);
   $('setup').hidden = !state.manage || Boolean(state.connection);
+  $('welcome').hidden = view !== 'overview' || Boolean(state.connection) || !state.manage;
+  $('overview').hidden = view !== 'overview' || !$('welcome').hidden;
+  set('outputStatus', state.lastScrape ? state.exportState + ' · Last Box scrape ' + shortTime(state.lastScrape) : state.exportState);
+  set('queryExample', 'orenda_app_channel_value{app_id=' + JSON.stringify(state.appId) + '}');
   renderReadings(); renderSelected(); renderEvents();
+  if (selectionChanged && page && view === 'channels') {
+    for (const channel of state.channels) staged.delete(channel.nodeId);
+    renderBasket(); drawNodes();
+    if (inspected && state.channels.some(channel => channel.nodeId === inspected.id)) $('addForm').hidden = true;
+  }
 }
 async function mutate(name, fields) {
   await request('api/' + name, { ...fields, revision: state.revision });
@@ -80,6 +92,8 @@ async function switchTo(next) {
   set('heading', {overview:'Controller overview',channels:'Channel selection',events:'Event monitor',
     output:'Prometheus integration',connection:'Connect a controller'}[next]);
   for (const id of views) $(id).hidden = next !== id;
+  $('welcome').hidden = next !== 'overview' || Boolean(state.connection) || !state.manage;
+  if (!$('welcome').hidden) $('overview').hidden = true;
   document.querySelectorAll('[data-view]').forEach(b => {
     if (b.dataset.view === next) b.setAttribute('aria-current', 'page');
     else b.removeAttribute('aria-current');
@@ -100,7 +114,10 @@ function renderReadings() {
   const body = el('tbody');
   for (const c of state.channels) {
     const item = state.samples[c.metric], row = el('tr');
-    for (const v of [c.metric, item?.good && item.numeric ? item.value : '—',
+    const channel = el('td');
+    channel.append(el('strong', c.name), el('small', c.metric));
+    row.append(channel);
+    for (const v of [item?.good && item.numeric ? item.value : '—',
       item?.quality || (state.online ? 'Waiting' : 'Offline'), shortTime(item?.sourceTime)]) row.append(el('td', v));
     body.append(row);
   }
@@ -119,14 +136,14 @@ function renderEvents() {
   set('eventStatus', state.eventState);
   set('source', state.notifier ? 'Event source · ' + state.notifier.name : 'Choose a controller object that supports events.');
   $('stopEvents').hidden = !state.manage || !state.notifier;
-  $('eventList').replaceChildren(...state.events.map(e => {
+  $('eventList').replaceChildren(...state.events.filter(e => [e.code,e.text,e.source].join(' ').toLowerCase().includes($('eventFilter').value.toLowerCase())).map(e => {
     const div = el('article', null, 'event');
     div.append(el('strong', [e.code, e.text].filter(Boolean).join(' · ') || 'Controller event'),
       el('p', [e.phase, e.source, 'Severity ' + (e.severity ?? '—'), e.retain == null ? '' : 'Retain ' + e.retain].filter(Boolean).join(' · ')),
       el('small', 'Controller ' + shortTime(e.time) + ' · Box ' + shortTime(e.received)));
     return div;
   }));
-  if (!state.events.length) $('eventList').append(empty('No events received this session.'));
+  if (!$('eventList').children.length) $('eventList').append(empty(state.events.length ? 'No matching events.' : 'No events received.'));
 }
 async function browse() {
   const generation = ++browseGeneration;
@@ -151,8 +168,17 @@ function drawNodes() {
       if (!folder) return inspect(r.id);
       path.push(r); offset = 0; $('filter').value = ''; $('inspector').hidden = true; await browse();
     }, 'node'));
+    if (!folder) {
+      const box = el('input'); box.type = 'checkbox'; box.className = 'channel-check'; box.setAttribute('aria-label','Monitor ' + r.name); box.checked = staged.has(r.id);
+      const monitored = state.channels.some(channel => channel.nodeId === r.id);
+      if (monitored) {
+        box.checked = true; box.disabled = true;
+        box.setAttribute('aria-label', r.name + ' is monitored');
+      }
+      box.onchange = () => { if (box.checked && staged.size >= 32) { box.checked = false; say('Save these 32 channels before selecting more.', true); return; } if (box.checked) staged.set(r.id, {id:r.id, path:[...path.map(p=>p.name),r.name].join(' / ')}); else staged.delete(r.id); renderBasket(); }; row.prepend(box);
+    }
     if (folder) row.append(btn('Inspect', () => inspect(r.id)));
-    else row.append(el('small', r.kind));
+    else row.append(el('small', state.channels.some(channel => channel.nodeId === r.id) ? 'Monitoring' : r.kind));
     return row;
   }));
   if (!rows.length) $('nodes').append(empty(query ? 'No matches on this page.' : 'No child nodes.'));
@@ -165,7 +191,9 @@ async function inspect(id) {
   $('preview').replaceChildren(el('h3', n.name), el('code', n.id, 'wrap'),
     el('p', n.kind === 'Variable' ? [n.type, n.quality, n.value ?? '—', shortTime(n.sourceTime)].join(' · ') : n.kind));
   if (n.quality === 'BadUserAccessDenied') $('preview').append(el('p', 'Check the controller user’s read permissions and enabled data options.'));
-  $('addForm').hidden = !(n.good && n.numeric);
+  const monitored = state.channels.some(channel => channel.nodeId === n.id);
+  if (monitored) $('preview').append(el('p', 'This channel is being monitored.'));
+  $('addForm').hidden = monitored || !(n.good && n.numeric);
   let suffix = (path.length > 1 ? path.slice(-2).map(p => p.name).concat(n.name) : [n.name]).join('_');
   suffix = suffix.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   $('metric').value = (/^[a-z]/.test(suffix) ? suffix : 'channel_' + suffix).slice(0, 63);
@@ -177,6 +205,17 @@ $('setup').onclick = action(() => switchTo('connection'));
 $('up').onclick = action(async () => { path.pop(); offset = 0; $('filter').value = ''; $('inspector').hidden = true; await browse(); });
 $('nextPage').onclick = action(async () => { offset = page.next; await browse(); });
 $('prevPage').onclick = action(async () => { offset = Math.max(0, offset - 64); await browse(); });
+function renderBasket() {
+  $('batch').hidden = !staged.size;
+  set('batchCount', staged.size + ' selected');
+}
+$('clearBatch').onclick = () => { staged.clear(); renderBasket(); drawNodes(); };
+$('saveBatch').onclick = action(async () => {
+  await mutate('addMany', { nodes: Array.from(staged.values()), generation: page.generation });
+  staged.clear(); renderBasket(); drawNodes(); await switchTo('overview');
+  say('Monitoring selected channels.');
+});
+$('eventFilter').oninput = renderEvents;
 $('filter').oninput = drawNodes;
 $('directForm').onsubmit = action(() => inspect($('direct').value.trim()));
 $('addForm').onsubmit = action(async () => { await mutate('add', { id: inspected.id, metric: $('metric').value.trim() }); say('Channel added to Prometheus output.'); });
@@ -191,7 +230,9 @@ $('url').oninput = () => { certificate = null; $('trust').hidden = true; $('conf
 $('method').onchange = () => { $('credentials').hidden = $('method').value !== 'UserName'; };
 $('discoverForm').onsubmit = action(async () => {
   $('trust').hidden = true; $('confirm').checked = false;
-  const url = $('url').value.trim();
+  let url = $('url').value.trim();
+  if (!url.includes('://')) url = 'opc.tcp://' + url + (url.includes(':') ? '' : ':4840');
+  $('url').value = url;
   const found = await request('api/discover', { url });
   if ($('url').value.trim() !== url) return;
   certificate = { ...found, url };

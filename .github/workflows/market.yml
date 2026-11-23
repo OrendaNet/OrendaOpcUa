@@ -24,4 +24,4 @@ jobs:
         env:
           ORENDA_REPO_ADMIN_USERNAME: ${{ secrets.ORENDA_REPO_ADMIN_USERNAME }}
           ORENDA_REPO_ADMIN_PASSWORD: ${{ secrets.ORENDA_REPO_ADMIN_PASSWORD }}
-        run: python tools/publish_market.py dist/orenda-app.json
+        run: node tools/publish-market.js dist/orenda-app.json

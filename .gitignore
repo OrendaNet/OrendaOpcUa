@@ -1,3 +1,6 @@
+node_modules/
+native/vendor/
+bin/
 .venv/
 __pycache__/
 .pytest_cache/

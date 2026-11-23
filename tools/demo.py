@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 from aiohttp import web
-from opcua_box.web import application
+from tests.support import InstalledApp, RuntimeFixture
 from tests.mock_server import Plant
 
 
@@ -17,21 +17,22 @@ async def main(port, fixture_port, directory=None):
     plant = Plant(secrets.token_urlsafe(24), fixture_port)
     await plant.start()
 
-    @web.middleware
-    async def developer(req, handler):
-        if req.host.split(":")[0] != "127.0.0.1":
-            raise web.HTTPForbidden()
-        origin = req.headers.get("Origin")
-        if origin and origin != "http://127.0.0.1:" + str(port):
-            raise web.HTTPForbidden()
-        headers = req.headers.copy()
-        headers.update({"x-orenda-edge-proxy-secret":secret, "x-orenda-username":"developer",
-                        "x-orenda-auth-source":"local-fixture", "x-orenda-user-roles":"admin"})
-        return await handler(req.clone(headers=headers))
-
     with (contextlib.nullcontext(directory) if directory else tempfile.TemporaryDirectory()) as directory:
-        app = application(Path(directory), secret)
-        app.middlewares.insert(0, developer)
+        edge = RuntimeFixture()
+        await edge.start()
+        installed = await InstalledApp(Path(directory), secret, edge.base).start()
+        async def forward(req):
+            if req.host.split(":")[0] != "127.0.0.1" or req.headers.get("Origin") not in (None, f"http://127.0.0.1:{port}"):
+                raise web.HTTPForbidden()
+            headers = {"x-orenda-edge-proxy-secret":secret, "x-orenda-username":"developer",
+                       "x-orenda-auth-source":"local-fixture", "x-orenda-user-roles":"admin"}
+            for header in ("Content-Type","Authorization"):
+                if header in req.headers:
+                    headers[header] = req.headers[header]
+            async with installed.session.request(req.method, req.path_qs, data=await req.read(), headers=headers) as res:
+                return web.Response(body=await res.read(), status=res.status, headers={"Content-Type":res.headers.get("Content-Type","text/plain")})
+        app = web.Application()
+        app.router.add_route("*","/{tail:.*}",forward)
         runner = web.AppRunner(app, access_log=None)
         await runner.setup()
         await web.TCPSite(runner, "127.0.0.1", port).start()
@@ -48,6 +49,8 @@ async def main(port, fixture_port, directory=None):
                     await plant.stop.write_value(False)
         finally:
             await runner.cleanup()
+            await installed.close()
+            await edge.server.close()
             await plant.stop_server()
 
 
