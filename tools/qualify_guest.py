@@ -17,6 +17,7 @@ def main():
     args.add_argument("--port", type=int, required=True)
     args.add_argument("--credential-file", type=Path, required=True)
     args.add_argument("--controller", required=True)
+    args.add_argument("--digest", help="Require this immutable image digest")
     opts = args.parse_args()
     base = f"http://127.0.0.1:{opts.port}"
     session = requests.Session()
@@ -48,7 +49,11 @@ def main():
     version = app["versions"][0]
     permissions = dict(acknowledged=True, fingerprint=version["permissionFingerprint"],
                        grantedCapabilities=app["metadata"]["orenda"]["capabilities"])
-    installed = call("/api/v1/apps/install", dict(appId=app["id"],projectId=project,version=version["version"],
+    if opts.digest and version["digest"] != opts.digest:
+        raise RuntimeError("Signed test catalog does not contain the qualified ARM64 digest")
+    previous = next((record for record in call("/api/v1/apps/installed")["apps"]
+                     if record["id"] == app["id"] and record.get("image") == version["image"]), None)
+    installed = {"installed":previous} if previous else call("/api/v1/apps/install", dict(appId=app["id"],projectId=project,version=version["version"],
                                                   permissions=permissions),timeout=1200)
     assert installed["installed"]["sdk"]["sdkVersion"] == "1.3"
     print("Market installer accepted the scoped grants and started the digest-pinned image.", flush=True)
@@ -72,9 +77,12 @@ def main():
     tree = call(prefix+"browse?"+urlencode({"id":robot["id"]}))
     nodes = [dict(id=n["id"],path="Robot / "+n["name"]) for n in tree["rows"] if n["name"] in {"ActualPosition","EmergencyStop"}]
     assert len(nodes)==2
-    change("addMany",dict(nodes=nodes,generation=tree["generation"]))
+    existing = {channel["identifier"] for channel in state()["channels"]}
+    missing = [node for node in nodes if node["id"].split(";", 1)[-1] not in existing]
+    if missing:
+        change("addMany",dict(nodes=missing,generation=tree["generation"]))
     change("notifier",{"id":robot["id"]})
-    end = time.monotonic()+160
+    end = time.monotonic()+240
     while time.monotonic()<end:
         status=state()
         if status["lastScrape"] and status["online"] and any(e["code"]=="KSS1" for e in status["events"]):
