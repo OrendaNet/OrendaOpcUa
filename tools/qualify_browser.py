@@ -48,7 +48,7 @@ with sync_playwright() as pw:
     page.get_by_role("button",name="Overview",exact=True).click()
     expect(page.locator("#readings")).to_contain_text("Good")
     page.get_by_role("button",name="Prometheus",exact=True).click()
-    expect(page.locator("#exposition")).to_contain_text("orenda_opcua_value_axis_a1_degrees")
+    expect(page.locator("#exposition")).to_contain_text('orenda_app_channel_value{app_id="orenda-opcua",channel="axis_a1_degrees"}')
     if os.environ.get("PROMETHEUS_BIN"):
         with tempfile.TemporaryDirectory() as work:
             folder = Path(work)

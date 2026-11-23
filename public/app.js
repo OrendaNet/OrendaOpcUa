@@ -68,7 +68,7 @@ async function refresh() {
   const recent = state.lastScrape && Date.now() - Date.parse(state.lastScrape) < 120000;
   set('scrapeStatus', recent ? 'Receiving scrapes' : state.lastScrape ? 'Last scrape > 2 min' : 'Awaiting scrape');
   set('scrapeTime', state.lastScrape ? shortTime(state.lastScrape) : 'No collector has scraped this app');
-  set('outputStatus', state.lastScrape ? 'Last collector scrape ' + shortTime(state.lastScrape) : 'Waiting for the first collector scrape.');
+  if (!['Publishing to Box', 'Awaiting first Box scrape'].includes(state.exportState)) set('scrapeStatus', state.exportState);
   $('setup').hidden = !state.manage || Boolean(state.connection);
   $('welcome').hidden = view !== 'overview' || Boolean(state.connection) || !state.manage;
   $('overview').hidden = view !== 'overview' || !$('welcome').hidden;
@@ -161,7 +161,7 @@ function drawNodes() {
     }, 'node'));
     if (!folder) {
       const box = el('input'); box.type = 'checkbox'; box.className = 'channel-check'; box.setAttribute('aria-label','Monitor ' + r.name); box.checked = staged.has(r.id);
-      box.onchange = () => { if (box.checked) staged.set(r.id, {id:r.id, path:[...path.map(p=>p.name),r.name].join(' / ')}); else staged.delete(r.id); renderBasket(); }; row.prepend(box);
+      box.onchange = () => { if (box.checked && staged.size >= 32) { box.checked = false; say('Save these 32 channels before selecting more.', true); return; } if (box.checked) staged.set(r.id, {id:r.id, path:[...path.map(p=>p.name),r.name].join(' / ')}); else staged.delete(r.id); renderBasket(); }; row.prepend(box);
     }
     if (folder) row.append(btn('Inspect', () => inspect(r.id)));
     else row.append(el('small', r.kind));

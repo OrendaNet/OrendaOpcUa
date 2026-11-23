@@ -1,0 +1,14 @@
+{
+  "name": "orenda-opcua",
+  "version": "0.2.0",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@orenda/box-sdk": "https://codeload.github.com/OrendaNet/OrendaBoxSDK/tar.gz/0c80af8a5e7ef4f26d4d40e9c0cb7cf4b0b3b8c8"
+  }
+}

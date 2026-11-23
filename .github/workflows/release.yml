@@ -17,7 +17,7 @@ jobs:
           test -z "$(git ls-remote --tags origin refs/tags/$version)"
           echo "VERSION=$version" >> "$GITHUB_ENV"
       - run: docker build -t opcua-integrator:check .
-      - run: docker run --rm -v "$PWD/tests:/app/tests:ro" opcua-integrator:check python -m unittest discover -t . -s tests
+      - run: sh tools/qualify-image.sh opcua-integrator:check
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -37,7 +37,7 @@ jobs:
         run: |
           python tools/release_manifest.py
           git clone --quiet https://github.com/OrendaNet/OrendaBoxSDK.git "$RUNNER_TEMP/box-sdk"
-          git -C "$RUNNER_TEMP/box-sdk" fetch --quiet origin b1c8169fa09af385e3f209370c16b30fa6b9e6d8
+          git -C "$RUNNER_TEMP/box-sdk" fetch --quiet origin 0c80af8a5e7ef4f26d4d40e9c0cb7cf4b0b3b8c8
           git -C "$RUNNER_TEMP/box-sdk" checkout --quiet FETCH_HEAD
           node "$RUNNER_TEMP/box-sdk/bin/orenda-box-sdk.js" validate dist/orenda-app.json --release
       - name: Publish the release

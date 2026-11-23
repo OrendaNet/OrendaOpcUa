@@ -1,0 +1,72 @@
+diff --git a/client.go b/client.go
+index 316ddff..f72f423 100644
+--- a/client.go
++++ b/client.go
+@@ -7,6 +7,7 @@ package opcua
+ import (
+ 	"context"
+ 	"crypto/rand"
++	"crypto/x509"
+ 	"expvar"
+ 	"fmt"
+ 	"io"
+@@ -842,6 +843,7 @@ func (c *Client) CreateSession(ctx context.Context, cfg *uasc.SessionConfig) (*S
+ 
+ 	req := &ua.CreateSessionRequest{
+ 		ClientDescription:       cfg.ClientDescription,
++		ServerURI:               c.cfg.serverURI,
+ 		EndpointURL:             c.endpointURL,
+ 		SessionName:             name,
+ 		ClientNonce:             nonce,
+@@ -849,6 +851,7 @@ func (c *Client) CreateSession(ctx context.Context, cfg *uasc.SessionConfig) (*S
+ 		RequestedSessionTimeout: float64(cfg.SessionTimeout / time.Millisecond),
+ 	}
+ 
++	if c.cfg.advertisedURL != "" { req.EndpointURL = c.cfg.advertisedURL }
+ 	var s *Session
+ 	// for the CreateSessionRequest the authToken is always nil.
+ 	// use sc.SendRequest() to enforce this.
+@@ -858,10 +861,13 @@ func (c *Client) CreateSession(ctx context.Context, cfg *uasc.SessionConfig) (*S
+ 			return err
+ 		}
+ 
++		if c.cfg.pinnedLeaf != nil {
++			chain, err := x509.ParseCertificates(res.ServerCertificate)
++			if err != nil || len(chain) == 0 || !chain[0].Equal(c.cfg.pinnedLeaf) { return ua.StatusBadCertificateInvalid }
++		}
+ 		err := sc.VerifySessionSignature(res.ServerCertificate, nonce, res.ServerSignature.Signature)
+ 		if err != nil {
+-			log.Printf("error verifying session signature: %s", err)
+-			return nil
++			return err
+ 		}
+ 
+ 		// Ensure we have a valid identity token that the server will accept before trying to activate a session
+diff --git a/config.go b/config.go
+index 4883898..098e680 100644
+--- a/config.go
++++ b/config.go
+@@ -57,6 +57,9 @@ func DefaultSessionConfig() *uasc.SessionConfig {
+ 
+ // Config contains all config options.
+ type Config struct {
++	advertisedURL string
++	serverURI string
++	pinnedLeaf *x509.Certificate
+ 	dialer    *uacp.Dialer
+ 	sechan    *uasc.Config
+ 	session   *uasc.SessionConfig
+@@ -421,6 +424,13 @@ func setCertificate(cert []byte, cfg *Config) error {
+ // a chosen endpoint (received from GetEndpoints())
+ func SecurityFromEndpoint(ep *ua.EndpointDescription, authType ua.UserTokenType) Option {
+ 	return func(cfg *Config) error {
++		if ep.SecurityMode == ua.MessageSecurityModeSignAndEncrypt {
++			chain, err := x509.ParseCertificates(ep.ServerCertificate)
++			if err != nil || len(chain) == 0 { return ua.StatusBadCertificateInvalid }
++			cfg.pinnedLeaf = chain[0]
++			cfg.advertisedURL = ep.EndpointURL
++			cfg.serverURI = ep.Server.ApplicationURI
++		}
+ 		cfg.sechan.SecurityPolicyURI = ep.SecurityPolicyURI
+ 		cfg.sechan.SecurityMode = ep.SecurityMode
+ 		cfg.sechan.RemoteCertificate = ep.ServerCertificate

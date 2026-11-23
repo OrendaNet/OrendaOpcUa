@@ -1,1 +1,0 @@
-"""OrendaBox OPC UA Integrator."""

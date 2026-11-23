@@ -13,7 +13,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from aiohttp import ClientSession
 from asyncua import ua
 from .mock_server import Plant
-from opcua_box.web import application
+from .support import InstalledApp, RuntimeFixture
 
 
 async def eventually(fn, predicate, timeout=12):
@@ -38,12 +38,14 @@ class Workflow(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self.plant.stop_server)
         self.headers = {"x-orenda-edge-proxy-secret": self.secret, "x-orenda-user-roles": "admin",
                         "x-orenda-auth-source": "edge", "x-orenda-username": "test"}
+        self.edge = RuntimeFixture()
+        await self.edge.start()
+        self.addAsyncCleanup(self.edge.server.close)
         await self.launch()
         self.addAsyncCleanup(lambda: self.client.close())
 
     async def launch(self):
-        self.client = TestClient(TestServer(application(self.tmp.name, self.secret)))
-        await self.client.start_server()
+        self.client = await InstalledApp(self.tmp.name, self.secret, self.edge.base).start()
 
     async def state(self):
         return await (await self.client.get("/api/state", headers=self.headers)).json()
@@ -56,18 +58,11 @@ class Workflow(unittest.IsolatedAsyncioTestCase):
         return result
 
     async def test_network_grant(self):
-        runtime = web.Application()
-        async def context(req):
-            self.assertEqual(req.headers["Authorization"], "Bearer " + self.secret)
-            return web.json_response({"capabilities": []})
-        runtime.router.add_get("/context", context)
-        async with TestServer(runtime) as edge:
-            env = {"ORENDA_EDGE_API_URL": str(edge.make_url("/")).rstrip("/"), "ORENDA_APP_TOKEN": self.secret}
-            with patch.dict(os.environ, env):
-                await self.client.close()
-                await self.launch()
-                denied = await self.post("discover", {"url":self.plant.url}, 400)
-                self.assertIn("Permissions", denied["error"])
+        self.edge.capabilities = []
+        await self.client.close()
+        await self.launch()
+        denied = await self.post("discover", {"url":self.plant.url}, 400)
+        self.assertIn("Permissions", denied["error"])
 
     async def test_commission_monitor_recover(self):
         self.assertEqual((await self.client.get("/api/state")).status, 401)
