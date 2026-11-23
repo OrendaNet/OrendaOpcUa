@@ -3,11 +3,12 @@ import contextlib
 import os
 import re
 import time
+import uuid
 from collections import deque
 from datetime import datetime, timezone
 
 from asyncua import ua
-from aiohttp import ClientSession, ClientTimeout
+from orenda_box_sdk import BoxRuntime
 
 from .protocol import endpoint_url, message, resolve, sample, session, stable
 
@@ -54,8 +55,12 @@ class Monitor:
         self.last_read = self.last_scrape = None
         self.last_good_connection = 0
         self.error = ""
+        self.runtime = BoxRuntime.from_environment()
+        self.export_message = "Waiting for Box runtime"
+        self.box_scrape = None
         self.granted = None
         self.grant_checked = 0
+        self.generation = None
         self.wake = asyncio.Event()
 
     @property
@@ -67,17 +72,11 @@ class Monitor:
         self.wake.set()
 
     async def network(self):
-        base = os.getenv("ORENDA_EDGE_API_URL")
-        if not base:
+        if self.runtime is None:
             return
-        if time.monotonic() - self.grant_checked > 15 or self.grant_checked == 0:
-            async with ClientSession(timeout=ClientTimeout(total=4)) as edge:
-                async with edge.get(base.rstrip("/") + "/context", allow_redirects=False,
-                                    headers={"Authorization": "Bearer " + os.environ["ORENDA_APP_TOKEN"]}) as response:
-                    if response.status != 200:
-                        raise ValueError("Edge could not verify this app's network grant. Check App permissions.")
-                    self.granted = "network:outbound" in (await response.json()).get("capabilities", [])
-                    self.grant_checked = time.monotonic()
+        if time.monotonic() - self.grant_checked > 15 or not self.grant_checked:
+            self.granted = "network:outbound" in (await self.runtime.context()).get("capabilities", [])
+            self.grant_checked = time.monotonic()
         if not self.granted:
             raise ValueError("Open Edge Console → Apps → OPC UA Integrator → Permissions and grant outbound network access.")
 
@@ -107,6 +106,7 @@ class Monitor:
             raise
         await self.close()
         self.client, self.ns, self.error = new, ns, ""
+        self.generation = uuid.uuid4().hex
         await self.events_setup()
 
     def node(self, value):
@@ -160,7 +160,7 @@ class Monitor:
         finally:
             if result.ContinuationPoint:
                 await self.client.uaclient.browse_next(ua.BrowseNextParameters(True, [result.ContinuationPoint]))
-        return dict(rows=rows[:64], next=offset + 64 if len(rows) > 64 else None)
+        return dict(rows=rows[:64], generation=self.generation, next=offset + 64 if len(rows) > 64 else None)
 
     async def events_setup(self):
         self.handler = None
@@ -235,6 +235,24 @@ class Monitor:
         return bool(self.client and self.last_good_connection and
                     time.monotonic() - self.last_good_connection < self.cfg["interval"] * 2 + 6)
 
+    async def export(self):
+        while True:
+            if self.runtime:
+                online = self.online()
+                channels = []
+                for channel in self.cfg["channels"]:
+                    name = channel["metric"]
+                    item = self.samples.get(name, {})
+                    valid = online and item.get("good") and item.get("numeric")
+                    channels.append({"name": name, "value": float(item["value"]) if valid else None})
+                try:
+                    result = await self.runtime.publish_channels(channels)
+                    self.box_scrape = result.get("lastScrape")
+                    self.export_message = "Awaiting first Box scrape" if not self.box_scrape else "Publishing to Box"
+                except Exception as exc:
+                    self.export_message = ("Approve measurement export in Edge Console" if "403" in str(exc) else "Box collector unavailable. Retrying automatically.")
+            await asyncio.sleep(5)
+
     def metrics(self):
         online = self.online()
         lines = ["# TYPE orenda_opcua_connected gauge", f"orenda_opcua_connected {int(online)}",
@@ -268,6 +286,33 @@ class Monitor:
             if type(interval) != int or not 1 <= interval <= 60:
                 raise ValueError("Choose a read interval from 1 to 60 seconds.")
             self.change(interval=interval)
+        elif action == "addMany":
+            nodes = data.get("nodes")
+            if not self.client or self.generation != data.get("generation"):
+                raise ValueError("The controller reconnected. Browse and select the channels again.")
+            if not isinstance(nodes, list) or not 1 <= len(nodes) <= 32:
+                raise ValueError("Select between 1 and 32 channels at a time.")
+            channels = list(self.cfg["channels"])
+            for entry in nodes:
+                if not isinstance(entry, dict) or not isinstance(entry.get("path"), str) or len(entry["path"]) > 2048:
+                    raise ValueError("Invalid channel selection.")
+                ref = stable(self.node(entry.get("id")).nodeid, self.ns)
+                if any(all(c[k] == v for k, v in ref.items()) for c in channels):
+                    continue
+                info = await self.preview(entry["id"])
+                if not info.get("good") or not info.get("numeric"):
+                    raise ValueError(f"{info['name']} cannot be exported ({info.get('quality', info['kind'])}). Select a readable numeric or Boolean signal.")
+                base = re.sub("[^a-z0-9]+", "_", entry["path"].lower()).strip("_")[-52:].strip("_")
+                base = base if re.match("[a-z]", base) else "channel_" + base
+                names = {c["metric"] for c in channels}
+                metric, sequence = base, 1
+                while metric in names:
+                    sequence += 1
+                    metric = f"{base}_{sequence}"
+                channels.append({**ref, "metric":metric, "name":info["name"]})
+            if len(channels) > 128:
+                raise ValueError("Up to 128 channels can be collected.")
+            self.change(channels=channels)
         elif action == "add":
             metric = data.get("metric", "")
             channels = self.cfg["channels"]

@@ -11,5 +11,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t opcua-integrator:check .
-      - run: docker run --rm -v "$PWD/tests:/app/tests:ro" opcua-integrator:check python -m unittest tests.test_integration
-      - run: bash tools/check-box-scrape.sh opcua-integrator:check
+      - run: docker run --rm -v "$PWD/tests:/app/tests:ro" opcua-integrator:check python -m unittest discover -t . -s tests

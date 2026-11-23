@@ -2,7 +2,7 @@ import asyncio
 import contextlib
 import hmac
 import os
-import socket
+from orenda_box_sdk import edge_identity
 from pathlib import Path
 
 from aiohttp import web
@@ -29,11 +29,10 @@ def application(directory, secret):
     async def authorize(req, handler):
         if req.path in {"/health", "/metrics"}:
             return await handler(req)
-        if not (eq(secret, req.headers.get("x-orenda-edge-proxy-secret", "")) and
-                req.headers.get("x-orenda-auth-source") and req.headers.get("x-orenda-username")):
+        identity = edge_identity(req.headers, secret)
+        if not identity:
             raise web.HTTPUnauthorized(text="Open the app from Edge Console.")
-        roles = {r.strip() for r in req.headers.get("x-orenda-user-roles", "").split(",")}
-        req[MANAGE] = bool(roles.intersection({"admin", "owner"}))
+        req[MANAGE] = bool(identity["roles"].intersection({"admin", "owner"}))
         if (req.method != "GET" or req.path in {"/api/token", "/api/browse", "/api/preview"}) and not req[MANAGE]:
             raise web.HTTPForbidden(text="An Edge administrator or owner is required.")
         try:
@@ -54,11 +53,11 @@ def application(directory, secret):
     async def state(req):
         c = store.data
         conn = c["connection"]
-        return web.json_response(dict(manage=req[MANAGE], revision=c["revision"], interval=c["interval"],
+        return web.json_response(dict(appId=os.getenv("ORENDA_APP_ID", "orenda-opcua"), generation=monitor.generation, manage=req[MANAGE], revision=c["revision"], interval=c["interval"],
                                       connection={k: conn[k] for k in ("url", "username", "fingerprint")} if conn else None,
                                       online=monitor.online(), error=monitor.error, channels=c["channels"],
                                       samples=monitor.samples if monitor.online() else {}, lastRead=monitor.last_read,
-                                      lastScrape=monitor.last_scrape, events=list(monitor.events),
+                                      lastScrape=monitor.box_scrape, externalScrape=monitor.last_scrape, exportState=monitor.export_message, events=list(monitor.events),
                                       eventState=monitor.event_state, notifier=c["notifier"]))
 
     async def api(req):
@@ -96,14 +95,9 @@ def application(directory, secret):
     async def token(req):
         return web.json_response({"token": store.data["token"]})
 
-    async def setup_helper(req):
-        return web.FileResponse(PUBLIC.parent / "tools" / "box_scrape.py", headers={
-            "Content-Disposition": 'attachment; filename="box_scrape.py"', "Content-Type": "application/octet-stream"})
-
     async def metrics(req):
-        if req.transport.get_extra_info("socket").family != getattr(socket, "AF_UNIX", None):
-            if not eq("Bearer " + store.data["token"], req.headers.get("Authorization", "")):
-                raise web.HTTPUnauthorized()
+        if not eq("Bearer " + store.data["token"], req.headers.get("Authorization", "")):
+            raise web.HTTPUnauthorized()
         monitor.last_scrape = utc()
         return web.Response(text=monitor.metrics(), headers={"Content-Type": "text/plain; version=0.0.4; charset=utf-8",
                                                             "Cache-Control": "no-store"})
@@ -113,23 +107,12 @@ def application(directory, secret):
 
     async def static(req):
         name = req.match_info.get("name", "index.html")
-        if name not in {"index.html", "style.css", "app.js"}:
+        if name not in {"index.html", "style.css", "app.js", "orendabox.png", "montserrat.woff2"}:
             raise web.HTTPNotFound()
         return web.FileResponse(PUBLIC / name)
 
     async def lifecycle(app):
-        runner = None
-        if os.name == "posix":
-            path = store.directory / "scrape"
-            path.mkdir(mode=0o750, exist_ok=True)
-            target = path / "metrics.sock"
-            target.unlink(missing_ok=True)
-            scrape_app = web.Application()
-            scrape_app.router.add_get("/metrics", metrics)
-            runner = web.AppRunner(scrape_app, access_log=None)
-            await runner.setup()
-            await web.UnixSite(runner, str(target)).start()
-            target.chmod(0o660)
+        exporter = asyncio.create_task(monitor.export())
         task = asyncio.create_task(monitor.run())
         try:
             yield
@@ -138,13 +121,15 @@ def application(directory, secret):
             with contextlib.suppress(asyncio.CancelledError):
                 await task
             await monitor.close()
-            if runner:
-                await runner.cleanup()
+            exporter.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await exporter
+            if monitor.runtime:
+                await monitor.runtime.close()
 
     app.cleanup_ctx.append(lifecycle)
     for path, handler in [("/health", health), ("/metrics", metrics), ("/api/state", state),
                           ("/api/preview", read), ("/api/browse", read), ("/api/certificate", certificate),
-                          ("/api/box-setup", setup_helper),
                           ("/api/token", token), ("/api/output", output), ("/", static), ("/{name}", static)]:
         app.router.add_get(path, handler)
     app.router.add_post("/api/{action}", api)

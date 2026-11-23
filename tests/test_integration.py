@@ -64,6 +64,8 @@ class Workflow(unittest.IsolatedAsyncioTestCase):
         async with TestServer(runtime) as edge:
             env = {"ORENDA_EDGE_API_URL": str(edge.make_url("/")).rstrip("/"), "ORENDA_APP_TOKEN": self.secret}
             with patch.dict(os.environ, env):
+                await self.client.close()
+                await self.launch()
                 denied = await self.post("discover", {"url":self.plant.url}, 400)
                 self.assertIn("Permissions", denied["error"])
 
@@ -97,10 +99,6 @@ class Workflow(unittest.IsolatedAsyncioTestCase):
         await eventually(scrape, lambda s: "orenda_opcua_value_emergency_stop 1" in s)
         self.assertIn("orenda_opcua_value_axis_a1_degrees -5.34", await scrape())
         self.assertNotIn(self.password, str(await self.state()))
-        if os.name == "posix":
-            async with ClientSession(connector=UnixConnector(path=str(Path(self.tmp.name)/"scrape"/"metrics.sock"))) as unix:
-                self.assertIn("orenda_opcua_value_emergency_stop 1", await (await unix.get("http://localhost/metrics")).text())
-                self.assertEqual((await unix.get("http://localhost/api/token")).status, 404)
         await self.plant.axis.write_value(ua.DataValue(ua.Variant(None), ua.StatusCode(ua.StatusCodes.BadOutOfService)))
         await eventually(scrape, lambda s: 'channel="axis_a1_degrees"} 0' in s)
         self.assertNotIn("orenda_opcua_value_axis_a1_degrees", await scrape())
@@ -114,4 +112,4 @@ class Workflow(unittest.IsolatedAsyncioTestCase):
         await eventually(scrape, lambda s: "orenda_opcua_value_axis_a1_degrees -5.34" in s)
         await self.post("remove", {"metric":"axis_a1_degrees"})
         self.assertNotIn("axis_a1_degrees", await scrape())
-        self.assertTrue((await self.state())["lastScrape"])
+        self.assertTrue((await self.state())["externalScrape"])
