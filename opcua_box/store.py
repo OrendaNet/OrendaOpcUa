@@ -1,6 +1,7 @@
 import json
 import os
 import secrets
+import socket
 import uuid
 from pathlib import Path
 
@@ -22,7 +23,7 @@ class Store:
             uri = "urn:orendabox:opcua:" + str(uuid.uuid4())
             key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
             cert = generate_self_signed_app_certificate(
-                key, "OrendaBox OPC UA Integrator", {}, [x509.UniformResourceIdentifier(uri)],
+                key, "OrendaBox OPC UA Integrator", {}, [x509.UniformResourceIdentifier(uri), x509.DNSName(socket.gethostname())],
                 [ExtendedKeyUsageOID.CLIENT_AUTH], days=1825)
             self.save(dict(uri=uri, cert=cert.public_bytes(serialization.Encoding.PEM).decode(),
                            key=key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,

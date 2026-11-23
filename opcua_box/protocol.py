@@ -96,8 +96,9 @@ def sample(data):
         numeric = False  # A Prometheus double cannot preserve arbitrary 64-bit integer precision.
     if isinstance(value, (list, tuple)):
         kind = kind + "[]"
+    display = value if numeric else (str(value)[:160] if isinstance(value, (str, int, float)) else None)
     return dict(quality=quality, good=data.StatusCode.is_good(), type=kind, numeric=numeric,
-                value=value if numeric else (str(value)[:160] if value is not None and data.StatusCode.is_good() else None),
+                value=display if data.StatusCode.is_good() else None,
                 sourceTime=data.SourceTimestamp.isoformat() if data.SourceTimestamp else None)
 
 

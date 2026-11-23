@@ -5,7 +5,9 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from aiohttp import web
 from aiohttp import UnixConnector
 from aiohttp.test_utils import TestClient, TestServer
 from aiohttp import ClientSession
@@ -52,6 +54,18 @@ class Workflow(unittest.IsolatedAsyncioTestCase):
         result = await response.json()
         self.assertEqual(response.status, status, result)
         return result
+
+    async def test_network_grant(self):
+        runtime = web.Application()
+        async def context(req):
+            self.assertEqual(req.headers["Authorization"], "Bearer " + self.secret)
+            return web.json_response({"capabilities": []})
+        runtime.router.add_get("/context", context)
+        async with TestServer(runtime) as edge:
+            env = {"ORENDA_EDGE_API_URL": str(edge.make_url("/")).rstrip("/"), "ORENDA_APP_TOKEN": self.secret}
+            with patch.dict(os.environ, env):
+                denied = await self.post("discover", {"url":self.plant.url}, 400)
+                self.assertIn("Permissions", denied["error"])
 
     async def test_commission_monitor_recover(self):
         self.assertEqual((await self.client.get("/api/state")).status, 401)

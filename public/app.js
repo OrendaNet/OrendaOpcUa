@@ -77,6 +77,8 @@ async function mutate(name, fields) {
 async function switchTo(next) {
   if (next === 'connection' && !state?.manage) return;
   view = next;
+  set('heading', {overview:'Controller overview',channels:'Channel selection',events:'Event monitor',
+    output:'Prometheus integration',connection:'Connect a controller'}[next]);
   for (const id of views) $(id).hidden = next !== id;
   document.querySelectorAll('[data-view]').forEach(b => {
     if (b.dataset.view === next) b.setAttribute('aria-current', 'page');
@@ -157,10 +159,12 @@ function drawNodes() {
   $('prevPage').hidden = offset === 0; $('nextPage').hidden = page.next == null;
 }
 async function inspect(id) {
+  $('inspector').hidden = true;
   inspected = await request('api/preview?id=' + encodeURIComponent(id));
   const n = inspected; $('inspector').hidden = false;
   $('preview').replaceChildren(el('h3', n.name), el('code', n.id, 'wrap'),
     el('p', n.kind === 'Variable' ? [n.type, n.quality, n.value ?? '—', shortTime(n.sourceTime)].join(' · ') : n.kind));
+  if (n.quality === 'BadUserAccessDenied') $('preview').append(el('p', 'Check the controller user’s read permissions and enabled data options.'));
   $('addForm').hidden = !(n.good && n.numeric);
   let suffix = (path.length > 1 ? path.slice(-2).map(p => p.name).concat(n.name) : [n.name]).join('_');
   suffix = suffix.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
@@ -170,7 +174,7 @@ async function inspect(id) {
 }
 document.querySelectorAll('[data-view],[data-go]').forEach(b => b.onclick = action(() => switchTo(b.dataset.view || b.dataset.go)));
 $('setup').onclick = action(() => switchTo('connection'));
-$('up').onclick = action(async () => { path.pop(); offset = 0; $('filter').value = ''; await browse(); });
+$('up').onclick = action(async () => { path.pop(); offset = 0; $('filter').value = ''; $('inspector').hidden = true; await browse(); });
 $('nextPage').onclick = action(async () => { offset = page.next; await browse(); });
 $('prevPage').onclick = action(async () => { offset = Math.max(0, offset - 64); await browse(); });
 $('filter').oninput = drawNodes;

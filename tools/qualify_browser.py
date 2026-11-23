@@ -34,9 +34,10 @@ with sync_playwright() as pw:
     page.get_by_role("button", name="Add channel").click()
     expect(page.locator("#selected")).to_contain_text("axis_a1_degrees")
     page.get_by_role("button", name="EmergencyStop", exact=True).click()
+    expect(page.locator("#preview h3")).to_have_text("EmergencyStop")
     page.get_by_label("Prometheus metric suffix").fill("emergency_stop")
     page.get_by_role("button", name="Add channel").click()
-    expect(page.locator("#selected")).to_contain_text("emergency_stop")
+    expect(page.locator("#selected").get_by_text("emergency_stop", exact=True)).to_be_visible()
     if shots:
         page.screenshot(path=str(Path(shots)/"channels.png"))
     page.get_by_role("button", name="Up a level").click()

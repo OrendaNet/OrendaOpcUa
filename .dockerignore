@@ -4,3 +4,6 @@
 !opcua_box/*.py
 !public/
 !public/*
+!tools/
+tools/*
+!tools/box_scrape.py

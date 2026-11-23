@@ -70,6 +70,7 @@ def application(directory, secret):
             raise ValueError("Expected a configuration object.")
         async with monitor.lock:
             if action == "discover":
+                await monitor.network()
                 _, _, _, info = await discover(data.get("url"))
                 return web.json_response(info)
             await monitor.update(action, data)
@@ -94,6 +95,10 @@ def application(directory, secret):
 
     async def token(req):
         return web.json_response({"token": store.data["token"]})
+
+    async def setup_helper(req):
+        return web.FileResponse(PUBLIC.parent / "tools" / "box_scrape.py", headers={
+            "Content-Disposition": 'attachment; filename="box_scrape.py"', "Content-Type": "application/octet-stream"})
 
     async def metrics(req):
         if req.transport.get_extra_info("socket").family != getattr(socket, "AF_UNIX", None):
@@ -139,6 +144,7 @@ def application(directory, secret):
     app.cleanup_ctx.append(lifecycle)
     for path, handler in [("/health", health), ("/metrics", metrics), ("/api/state", state),
                           ("/api/preview", read), ("/api/browse", read), ("/api/certificate", certificate),
+                          ("/api/box-setup", setup_helper),
                           ("/api/token", token), ("/api/output", output), ("/", static), ("/{name}", static)]:
         app.router.add_get(path, handler)
     app.router.add_post("/api/{action}", api)

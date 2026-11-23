@@ -1,13 +1,15 @@
 import asyncio
 import contextlib
+import os
 import re
 import time
 from collections import deque
 from datetime import datetime, timezone
 
 from asyncua import ua
+from aiohttp import ClientSession, ClientTimeout
 
-from .protocol import discover, endpoint_url, message, resolve, sample, session, stable
+from .protocol import endpoint_url, message, resolve, sample, session, stable
 
 
 def utc():
@@ -52,6 +54,8 @@ class Monitor:
         self.last_read = self.last_scrape = None
         self.last_good_connection = 0
         self.error = ""
+        self.granted = None
+        self.grant_checked = 0
         self.wake = asyncio.Event()
 
     @property
@@ -61,6 +65,21 @@ class Monitor:
     def change(self, **fields):
         self.store.save({**self.cfg, **fields, "revision": self.cfg["revision"] + 1})
         self.wake.set()
+
+    async def network(self):
+        base = os.getenv("ORENDA_EDGE_API_URL")
+        if not base:
+            return
+        if time.monotonic() - self.grant_checked > 15 or self.grant_checked == 0:
+            async with ClientSession(timeout=ClientTimeout(total=4)) as edge:
+                async with edge.get(base.rstrip("/") + "/context", allow_redirects=False,
+                                    headers={"Authorization": "Bearer " + os.environ["ORENDA_APP_TOKEN"]}) as response:
+                    if response.status != 200:
+                        raise ValueError("Edge could not verify this app's network grant. Check App permissions.")
+                    self.granted = "network:outbound" in (await response.json()).get("capabilities", [])
+                    self.grant_checked = time.monotonic()
+        if not self.granted:
+            raise ValueError("Open Edge Console → Apps → OPC UA Integrator → Permissions and grant outbound network access.")
 
     async def close(self):
         self.handler = self.sub = None
@@ -197,6 +216,7 @@ class Monitor:
                 self.wake.clear()
                 if self.cfg["connection"]:
                     try:
+                        await self.network()
                         if not self.client:
                             await self.connect(self.cfg["connection"])
                         await self.collect()
@@ -234,6 +254,7 @@ class Monitor:
         if data.get("revision") != self.cfg["revision"]:
             raise ValueError("Configuration changed in another session. Refresh before applying your edits.")
         if action == "connect":
+            await self.network()
             url = endpoint_url(data.get("url"))
             pin = data.get("fingerprint", "")
             username, password = data.get("username", ""), data.get("password", "")
