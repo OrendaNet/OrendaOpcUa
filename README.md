@@ -6,11 +6,11 @@ Connect a read-only OPC UA observer to a controller, choose the channels to coll
 
 ## Connect your first controller
 
-1. Install the ARM64 app through Orenda Apps and grant **Outbound network access** so the Box can reach the controller.
-2. Open **Connection**, enter the full address (for example, `opc.tcp://controller:4840/`), then select **Discover endpoint**. Compare the displayed SHA-256 fingerprint with the controller's certificate.
+1. Install the ARM64 app through Orenda Apps and approve **Outbound network access** and **Publish app measurements**.
+2. Open **Connection**, enter the controller IP, hostname or full address (for example, `opc.tcp://controller:4840/`), then select **Discover endpoint**. Compare the displayed SHA-256 fingerprint with the controller's certificate.
 3. Choose an identity offered by the server. For a server that requires client trust, download the Box public certificate from the same screen and import it into the controller's trusted client list. Select **Trust and connect**.
-4. Open **Channels** and browse to a variable, or inspect a known NodeId. Check its current value, quality and controller time. Choose a metric suffix including its unit when appropriate, such as `axis_a1_degrees`, then **Add channel**.
-5. Configure the collector once using the [Box Prometheus setup](docs/prometheus.md). **Overview** shows when the collector last scraped the app. The **Prometheus** preview displays the output independently.
+4. Open **Channels** and browse to a variable, or inspect a known NodeId. Check its current value, quality and controller time. Tick the signals and choose **Monitor selected channels**. The app suggests names from the browse path. Use **Advanced metric name** to choose your own name and unit.
+5. The Box automatically collects selected channels through the [SDK measurement contract](docs/prometheus.md). **Overview** shows when the collector last scraped the app. The **Prometheus** preview displays the output independently.
 6. To receive faults, browse to a controller object, **Inspect**, and choose **Listen for events here**. **Events** shows the last 200 messages received in this app process, with controller and Box times, code, text, severity and retained flag. Servers supporting condition refresh can replay retained conditions when a subscription starts.
 
 ## Controller compatibility
@@ -23,14 +23,21 @@ On KUKA DeviceConnector, browse through **DeviceSet → MotionDeviceSystem → M
 
 ## Data and access
 
-Edge controls the network grant and signs in users through the app-specific proxy. The certificate key, controller credentials and selections live in the app-owned persistent volume in a mode-0600 file. Treat volume backups as credentials. A distinct read-only bearer credential authorizes TCP scrapes. The bundled Box collector can use a dedicated local scrape socket. Installing the market app leaves host Prometheus configuration with the Box administrator.
+Edge controls the network grant and signs in users through the app-specific proxy. The certificate key, controller credentials and selections live in the app-owned persistent volume in a mode-0600 file. Treat volume backups as credentials. A distinct read-only bearer credential authorizes TCP scrapes. The stock Box collector uses the platform-owned Edge scrape job. Revoking the publish grant removes the app from that job.
 
 ## Offline development
 
-Use Python 3.10–3.12. From the repository root install the pinned dependencies in a virtual environment, then run:
+The Box image contains the native ARM64 OPC UA collector, Node.js and the JavaScript OrendaBox SDK. The collector exchanges bounded requests with its parent through private pipes. Build the image from the repository root. On a matching Linux host, the qualification script starts the production app with an independent OPC UA simulator.
 
 ```sh
-python -m pip install -r requirements.txt
+docker build -t orenda-opcua:test .
+sh tools/qualify-image.sh orenda-opcua:test
+```
+
+For interactive development, build the collector into `bin/collector` (Windows uses `collector.exe`) with the same dependency patch as the Dockerfile. Install the JavaScript package lock with `npm ci`. In a Python 3.10–3.12 test environment run:
+
+```sh
+python -m pip install -r tests/requirements.txt
 python -m unittest tests.test_integration
 python -m tools.demo
 ```

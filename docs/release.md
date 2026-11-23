@@ -1,7 +1,7 @@
-# OPC UA Integrator 0.1.0
+# OPC UA Integrator 0.2.0 candidate
 
-The initial ARM64 release supports secure OPC UA server commissioning, controller certificate pinning, read-only operator views, direct NodeId inspection, selected numeric and Boolean channels, and a bounded recent-event view. The only requested SDK capability is outbound network access for the controller connection. Requires DevicePlatform 0.2.45 or newer.
+The ARM64 service uses a compiled Go OPC UA collector and the JavaScript OrendaBox SDK. It supports certificate-pinned controller sessions, authentication, variable browsing and inspection, batch selection, source timestamps, quality and alarm events. DevicePlatform owns the local Prometheus target and scrape credential. Installation requires SDK contract 1.3, Edge Manager 0.2.80 and DevicePlatform 0.2.92.
 
-Offline protocol tests cover secure username login, incorrect credentials, changed fingerprints, Edge roles, configured channel removal, bad-quality values, an emergency-stop event, a controller restart with reordered namespaces and app restart recovery. Browser qualification uses a simulated robot and an independent Prometheus 2.54.1 server. Native ARM64 container qualification exercises the scrape-only socket relay and PromQL readback. Physical KRC4 qualification of the packaged app is pending device availability.
+Operators can view readings and events. An Edge administrator chooses the controller, trusts its certificate and selects signals. The client certificate and configuration persist in the app volume. Recent events are held in memory. This version targets one server and one notifier per installation.
 
-[Setup guide](https://github.com/OrendaNet/OrendaOpcUa#readme) · [Box Prometheus setup](https://github.com/OrendaNet/OrendaOpcUa/blob/main/docs/prometheus.md) · [Report an issue](https://github.com/OrendaNet/OrendaOpcUa/issues)
+See the [commissioning guide](../README.md), [collection reference](prometheus.md) and [design decisions](design.md).

@@ -29,7 +29,10 @@ def main():
                 detail = str(response.json().get("error", ""))[:500]
             except ValueError:
                 detail = "Non-JSON response"
-            raise RuntimeError(f"{path.split('?')[0]} HTTP {response.status_code} {detail}")
+            route = path.split("?")[0]
+            if "/~" in route:
+                route = "/isolated-app/" + route.rsplit("/", 1)[-1]
+            raise RuntimeError(f"{route} HTTP {response.status_code} {detail}")
         return response.json()
 
     if not opts.credential_file.exists():
