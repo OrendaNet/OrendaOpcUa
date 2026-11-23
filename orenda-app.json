@@ -1,0 +1,9 @@
+{
+  "id": "orenda-opcua",
+  "name": "OPC UA Integrator",
+  "description": "Browse secure OPC UA controllers, monitor selected machine signals and events, and collect named channels in Prometheus.",
+  "category": "industrial",
+  "runtime": "compose",
+  "metadata": {"orenda": {"sdkVersion": "1", "containerPort": 3101, "healthPath": "/health", "ui": {"enabled": true}, "capabilities": ["network:outbound"], "minPlatformVersion": "0.2.45"}},
+  "versions": []
+}

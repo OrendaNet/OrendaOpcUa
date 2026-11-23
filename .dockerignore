@@ -1,0 +1,6 @@
+**
+!requirements.txt
+!opcua_box/
+!opcua_box/*.py
+!public/
+!public/*

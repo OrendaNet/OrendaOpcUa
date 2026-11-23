@@ -1,0 +1,45 @@
+name: Release OPC UA Integrator
+on: workflow_dispatch
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+concurrency: opcua-release
+jobs:
+  release:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reserve a new version
+        run: |
+          version="$(cat VERSION)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test -z "$(git ls-remote --tags origin refs/tags/$version)"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - run: docker build -t opcua-integrator:check .
+      - run: docker run --rm -v "$PWD/tests:/app/tests:ro" opcua-integrator:check python -m unittest tests.test_integration
+      - run: bash tools/check-box-scrape.sh opcua-integrator:check
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push the tested image
+        run: |
+          target="ghcr.io/orendanet/orenda-opcua:$VERSION"
+          docker tag opcua-integrator:check "$target"
+          docker push "$target"
+          ref="$(docker inspect "$target" --format '{{index .RepoDigests 0}}')"
+          echo "IMAGE_DIGEST=${ref##*@}" >> "$GITHUB_ENV"
+      - uses: sigstore/cosign-installer@v3
+      - name: Sign digest
+        run: cosign sign --yes "ghcr.io/orendanet/orenda-opcua@$IMAGE_DIGEST"
+      - name: Generate and validate the market manifest
+        run: |
+          python tools/release_manifest.py
+          git clone --quiet https://github.com/OrendaNet/OrendaBoxSDK.git "$RUNNER_TEMP/box-sdk"
+          node "$RUNNER_TEMP/box-sdk/bin/orenda-box-sdk.js" validate dist/orenda-app.json --release
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$VERSION" dist/orenda-app.json --target "$GITHUB_SHA" --title "OPC UA Integrator $VERSION" --notes-file docs/release.md
