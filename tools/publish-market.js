@@ -24,7 +24,7 @@ async function main() {
   const img = 'https://raw.githubusercontent.com/OrendaNet/OrendaOpcUa/' + v.version + '/docs/screens/';
   await api(app + '/storefront',{token, method:'PUT', body:{slug:id,headline:name,shortDescription:description,
     longDescription:'Connect a controller, approve its certificate and select signals. The Box collects selected readings automatically. Inspect channel quality, controller timestamps and recent events in Edge Console.',
-    categories:['industrial','monitoring'], tags:['opc-ua','prometheus','robotics','telemetry'], screenshots:[img+'overview.png',img+'channels.png'], documentationUrl:github+'#readme',supportUrl:github+'/issues'}});
+    categories:['industrial','monitoring'], tags:['opc-ua','prometheus','robotics','telemetry'], logoUrl:img+'orendabox.png', heroUrl:img+'overview.png', screenshots:[img+'overview.png',img+'channels.png'], documentationUrl:github+'#readme',supportUrl:github+'/issues'}});
   const previous = (await api(app+'/versions',{token})).versions.find(x => x.version === v.version);
   if (previous && previous.digest !== v.digest) throw Error('Market version already uses a different digest');
   if (!previous) await api(app+'/versions',{token,body:v});
